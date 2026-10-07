@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using Photon.Pun;
 using UnityEngine;
 
-public class PlayerMovementManagerT : MonoBehaviour
+public class PlayerMovementManagerT : MonoBehaviour, IPunObservable
 {
     private const float _runningForce = 1f;
 
@@ -23,16 +23,29 @@ public class PlayerMovementManagerT : MonoBehaviour
 
     Rigidbody rb;
 
+    // Counts jumps so other clients can replay the one-shot "doJump" trigger. A trigger that is set and
+    // consumed between two network updates would never be seen if we only sent its current value.
+    int _jumpCount;
+
+    int _receivedJumpCount = -1;
+
     void Awake()
     {
         rb = GetComponent<Rigidbody>();
         _isGrounded = CheckIsGrounded();
         //_anim = GetComponentInChildren<Animator>();
         _pv = this.GetComponent<PhotonView>();
+
+        // Other players' avatars are moved by PhotonTransformView. If physics can also push them, the two
+        // fight each other and the avatar jitters and rubber-bands.
+        if (!_pv.IsMine) rb.isKinematic = true;
     }
 
     void FixedUpdate()
     {
+        // Remote avatars get their animator state from OnPhotonSerializeView instead.
+        if (!_pv.IsMine) return;
+
         //handle left/right/up/down/walk/run/jump
 
         _anim.SetBool("isWalk", false);
@@ -60,6 +73,7 @@ public class PlayerMovementManagerT : MonoBehaviour
                 _isGrounded = false;
                 _anim.SetBool("isJump", true);
                 _anim.SetTrigger("doJump");
+                _jumpCount++;
             }
         }
 
@@ -100,5 +114,27 @@ public class PlayerMovementManagerT : MonoBehaviour
             .Raycast(transform.position,
             Vector3.down,
             transform.localScale.y / 2 + 0.1f);
+    }
+
+    // Listed in the PhotonView's Observed Components, next to PhotonTransformView.
+    public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
+    {
+        if (stream.IsWriting)
+        {
+            stream.SendNext(_anim.GetBool("isWalk"));
+            stream.SendNext(_anim.GetBool("isRun"));
+            stream.SendNext(_anim.GetBool("isJump"));
+            stream.SendNext(_jumpCount);
+        }
+        else
+        {
+            _anim.SetBool("isWalk", (bool)stream.ReceiveNext());
+            _anim.SetBool("isRun", (bool)stream.ReceiveNext());
+            _anim.SetBool("isJump", (bool)stream.ReceiveNext());
+
+            int jumpCount = (int)stream.ReceiveNext();
+            if (_receivedJumpCount >= 0 && jumpCount != _receivedJumpCount) _anim.SetTrigger("doJump");
+            _receivedJumpCount = jumpCount;
+        }
     }
 }

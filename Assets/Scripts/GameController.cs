@@ -7,6 +7,8 @@ using System.IO;
 using TMPro;
 using System.Linq;
 
+using Hashtable = ExitGames.Client.Photon.Hashtable;
+
 public class GameController : MonoBehaviourPunCallbacks
 {
     public TextMeshProUGUI rank, activity, hp;
@@ -16,8 +18,10 @@ public class GameController : MonoBehaviourPunCallbacks
     public bool MasterMode = false;
     public GameObject MasterCamera;
 
-    private float currentSurviveTime = 0f;
-    private Dictionary<string, float> score = new Dictionary<string, float>();
+    // Player property holding PhotonNetwork.ServerTimestamp (ms) from when the player spawned. Every client
+    // computes survive time from it locally, so nothing has to be sent while the game runs.
+    private const string SpawnTimeKey = "spawnTime";
+
     private List<string> activitys = new List<string>();
 
     private PhotonView _pv;
@@ -45,40 +49,31 @@ public class GameController : MonoBehaviourPunCallbacks
      else{
   PhotonNetwork.Instantiate(Path.Combine("PhotonPrefabs", "PlayerWhite"), spawnLocation[Random.Range(0, spawnLocation.Length)].position, Quaternion.identity);
      }
+        PhotonNetwork.LocalPlayer.SetCustomProperties(new Hashtable { { SpawnTimeKey, PhotonNetwork.ServerTimestamp } });
         // Annouce($"{PhotonNetwork.NickName} Joined");
     }
 
     private void Update()
     {
-        var sortedScore = (from entry in score orderby entry.Value descending select entry).ToList();
-        bool meInTopFive = false;
+        // Players leave the room when they die, so everyone still in PlayerList is alive.
+        var sortedScore = PhotonNetwork.PlayerList
+            .Where(player => player.CustomProperties.ContainsKey(SpawnTimeKey))
+            .Select(player => (player, time: GetSurviveTime(player)))
+            .OrderByDescending(entry => entry.time)
+            .ToList();
+        int myIndex = sortedScore.FindIndex(entry => entry.player.IsLocal);
 
         rank.text ="";
         for (int i = 0; i < Mathf.Min(sortedScore.Count, 5); i++)
         {
-            rank.text += $"{i + 1}. {GetFormatNameIfIsMine(i)}\n";
+            // Keep the local player on the board: if they're not in the top five, they take the last line.
+            int idx = (i == 4 && myIndex > 4) ? myIndex : i;
+            var entry = sortedScore[idx];
+            string playerName = entry.player.IsLocal ? $"<b>{entry.player.NickName}</b>" : entry.player.NickName;
+            rank.text += $"{idx + 1}. {playerName} - {GetTimeFormat(entry.time)}\n";
         }
 
-        if (MasterMode) return;
-        currentSurviveTime += Time.deltaTime;
-        // _pv.RPC("RPC_UpdateRanking", RpcTarget.AllBufferedViaServer, PhotonNetwork.NickName, currentSurviveTime);
-        score[PhotonNetwork.NickName] = currentSurviveTime;
-
-        string GetFormatNameIfIsMine(int idx)
-        {
-            if (PhotonNetwork.NickName.Equals(sortedScore[idx].Key))
-            {
-                meInTopFive = true;
-                return $"<b>{sortedScore[idx].Key}</b> - {GetTimeFormat(sortedScore[idx].Value)}";
-            }
-
-            if (idx == 4 && meInTopFive == false)
-            {
-                return $"<b>{PhotonNetwork.NickName}</b> - {GetTimeFormat(sortedScore.Single(x => x.Key == PhotonNetwork.NickName).Value)}";
-            }
-
-            return $"{sortedScore[idx].Key} - {GetTimeFormat(sortedScore[idx].Value)}";
-        }
+        float GetSurviveTime(Player player) => unchecked(PhotonNetwork.ServerTimestamp - (int)player.CustomProperties[SpawnTimeKey]) / 1000f;
 
         string GetTimeFormat(float second) => System.TimeSpan.FromSeconds(second).ToString("m\\:ss\\.ff");
     }
@@ -103,19 +98,6 @@ public class GameController : MonoBehaviourPunCallbacks
         foreach (var item in activitys)
         {
             activity.text += item + "\n";
-        }
-    }
-
-    [PunRPC]
-    public void RPC_UpdateRanking(string playerName, float time)
-    {
-        if (score.ContainsKey(playerName))
-        {
-            score[playerName] = time;
-        }
-        else
-        {
-            score.Add(playerName,time);
         }
     }
 }
