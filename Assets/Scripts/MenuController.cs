@@ -95,7 +95,14 @@ public class MenuController : MonoBehaviourPunCallbacks
         Debug.Log("[PUN] All rooms player count :" + PhotonNetwork.CountOfPlayersInRooms);
         Debug.Log("[PUN] CurrentRoom room player count :" + PhotonNetwork.CurrentRoom.PlayerCount);
 
-        PhotonNetwork.LoadLevel(1);
+        // Only the master loads the level. With AutomaticallySyncScene on, PUN already loaded the master's
+        // scene for everyone else as soon as they joined (this callback runs after that load finishes).
+        // Calling LoadLevel here too reloads the Game scene, which can leave the player spawned by the
+        // first load behind as a frozen ghost on everyone else's screen.
+        if (PhotonNetwork.IsMasterClient)
+        {
+            PhotonNetwork.LoadLevel(1);
+        }
     }
 
     public override void OnCreateRoomFailed(short returnCode, string message)

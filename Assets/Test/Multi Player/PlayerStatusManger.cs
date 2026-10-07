@@ -19,9 +19,11 @@ public class PlayerStatusManger : MonoBehaviour
     void Start()
     {
         currentHealth = _maxHp;
-        GameController.Main().SetHP(currentHealth);
         _isDead = false;
         _pv = this.GetComponent<PhotonView>();
+
+        // Start runs for every player's avatar on every client; only our own avatar owns the HP display.
+        if (_pv.IsMine) GameController.Main().SetHP(currentHealth);
     }
 
     void Update()

@@ -4,7 +4,7 @@ using System.IO;
 using Photon.Pun;
 using UnityEngine;
 
-public class ShootingManagerT : MonoBehaviour
+public class ShootingManagerT : MonoBehaviour, IPunObservable
 {
     public GameObject _bulletEmitter;
 
@@ -26,6 +26,11 @@ public class ShootingManagerT : MonoBehaviour
     bool _isTesting = false;
 
     private int bulletCount = 5;
+
+    // Counts shots so other clients can replay the one-shot "doShot" trigger (see PlayerMovementManagerT).
+    private int _shotCount;
+
+    private int _receivedShotCount = -1;
 
     void Start()
     {
@@ -49,6 +54,7 @@ public class ShootingManagerT : MonoBehaviour
             GameController.Main().SetAmmo(bulletCount);
             _anim.SetTrigger("doShot");
             _anim.SetBool("isShot", true);
+            _shotCount++;
             GameObject tempBullet;
 
             if(_isTesting)  tempBullet = Instantiate (_bullet, _bulletEmitter.transform.position, _bulletEmitter.transform.rotation) as GameObject;
@@ -91,4 +97,21 @@ public class ShootingManagerT : MonoBehaviour
         }
     }
 
+    // Listed in the PhotonView's Observed Components, next to PhotonTransformView.
+    public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
+    {
+        if (stream.IsWriting)
+        {
+            stream.SendNext(_anim.GetBool("isShot"));
+            stream.SendNext(_shotCount);
+        }
+        else
+        {
+            _anim.SetBool("isShot", (bool)stream.ReceiveNext());
+
+            int shotCount = (int)stream.ReceiveNext();
+            if (_receivedShotCount >= 0 && shotCount != _receivedShotCount) _anim.SetTrigger("doShot");
+            _receivedShotCount = shotCount;
+        }
+    }
 }
